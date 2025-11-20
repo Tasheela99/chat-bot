@@ -1,5 +1,6 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from groq import Groq
 from app.models import ChatRequest, ChatResponse
 from app.config import settings
@@ -68,9 +69,6 @@ async def list_contexts():
         raise HTTPException(status_code=500, detail=str(e))
 
 
-from fastapi import Request
-from fastapi.responses import JSONResponse
-
 @app.post("/chat", response_model=ChatResponse)
 async def chat(request: Request):
     """
@@ -86,6 +84,36 @@ async def chat(request: Request):
 
         from app.contexts.context_data import get_context
         context_data = get_context(context_name, language=language)
+
+        # Check for inappropriate language FIRST before any other processing
+        BAD_WORDS = [
+            "fuck", "shit", "bitch", "asshole", "bastard", "damn", "piss", "dick", "cunt", "fag", "slut", "whore",
+            "පිස්සෝ", "කෙල්ල", "පොන්නයා", "පකයා", "පකී", "පොන්නි", "பொன்னையா", "பক्कியා", "பொன்னி", "பக্কি"
+        ]
+        
+        if any(bad_word in question.lower() for bad_word in BAD_WORDS):
+            # Create appropriate error messages based on language
+            error_messages = {
+                "en": {
+                    "answer": "I cannot process requests containing inappropriate language. Please rephrase your question respectfully.",
+                    "error": "Inappropriate language detected. Please use respectful language when asking questions."
+                },
+                "si": {
+                    "answer": "අනුචිත භාෂාව සහිත ඉල්ලීම් මට සැකසිය නොහැක. කරුණාකර ඔබගේ ප්‍රශ්නය ගෞරවනීය ලෙස නැවත ප්‍රකාශ කරන්න.",
+                    "error": "අනුචිත භාෂාව අනාවරණය විය. ප්‍රශ්න ඇසීමේදී කරුණාකර ගෞරවනීය භාෂාව භාවිතා කරන්න."
+                },
+                "ta": {
+                    "answer": "பொருத்தமற்ற மொழிக் கொண்ட கோரிக்கைகளை என்னால் செயலாக்க முடியாது. தயவுசெய்து உங்கள் கேள்வியை மரியாதையுடன் மறுபரிசீலனை செய்யுங்கள்.",
+                    "error": "பொருத்தமற்ற மொழி கண்டறியப்பட்டது. கேள்விகள் கேட்கும்போது தயவுசெய்து மரியாதையான மொழியைப் பயன்படுத்துங்கள்."
+                }
+            }
+            lang_messages = error_messages.get(language, error_messages["en"])
+            return ChatResponse(
+                answer=lang_messages["answer"],
+                context_used=context_name,
+                success=False,
+                error=lang_messages["error"]
+            )
 
         # Check for greetings and provide welcome responses
         greetings = {
@@ -140,19 +168,38 @@ async def chat(request: Request):
                     success=True
                 )
 
-        # Check for bad words (simple list, can be expanded)
+        # Check for inappropriate language
         BAD_WORDS = [
             "fuck", "shit", "bitch", "asshole", "bastard", "damn", "piss", "dick", "cunt", "fag", "slut", "whore",
-            "පිස්සෝ", "කෙල්ල", "පොන්නයා", "පකයා", "පකී", "පොන්නි", "பொன்னையா", "பக்கியா", "பொன்னி", "பக்கி"
+            "පිස්සෝ", "කෙල්ල", "පොන්නයා", "පකයා", "පකී", "පොන්නි", "බොකයා", "බක්කියා", "බොන්නි", "බක්කි"
         ]
+        
         if any(bad_word in question.lower() for bad_word in BAD_WORDS):
+            # Create appropriate error messages based on language
+            error_messages = {
+                "en": {
+                    "answer": "I cannot process requests containing inappropriate language. Please rephrase your question respectfully.",
+                    "error": "Inappropriate language detected. Please use respectful language when asking questions."
+                },
+                "si": {
+                    "answer": "අනුචිත භාෂාව සහිත ඉල්ලීම් මට සැකසිය නොහැක. කරුණාකර ඔබගේ ප්‍රශ්නය ගෞරවනීය ලෙස නැවත ප්‍රකාශ කරන්න.",
+                    "error": "අනුචිත භාෂාව අනාවරණය විය. ප්‍රශ්න ඇසීමේදී කරුණාකර ගෞරවනීය භාෂාව භාවිතා කරන්න."
+                },
+                "ta": {
+                    "answer": "பொருத்தமற்ற மொழியைக் கொண்ட கோரிக்கைகளை என்னால் செயலாக்க முடியாது. தயவுசெய்து உங்கள் கேள்வியை மரியாதையுடன் மறுபரிசீலனை செய்யுங்கள்.",
+                    "error": "பொருத்தமற்ற மொழி கண்டறியப்பட்டது. கேள்விகள் கேட்கும்போது தயவுசெய்து மரியாதையான மொழியைப் பயன்படுத்துங்கள்."
+                }
+            }
+            
+            lang_messages = error_messages.get(language, error_messages["en"])
+            
             return JSONResponse(
-                status_code=400,
+                status_code=status.HTTP_400_BAD_REQUEST,
                 content={
-                    "answer": "",
+                    "answer": lang_messages["answer"],
                     "context_used": context_name,
                     "success": False,
-                    "error": "Inappropriate language detected."
+                    "error": lang_messages["error"]
                 }
             )
 
@@ -167,8 +214,6 @@ async def chat(request: Request):
             return bool(re.search(r"[A-Za-z]", text))
 
         # Language check logic
-        from fastapi import status
-        from fastapi.responses import JSONResponse
         if language == "en" and not is_english(question):
             return JSONResponse(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -206,26 +251,23 @@ async def chat(request: Request):
             context_mod = importlib.import_module(context_mod_name)
             if hasattr(context_mod, 'get_faq_answer'):
                 faq_answer = context_mod.get_faq_answer(question)
+                # Return the FAQ answer unless it's the default "sorry" message
+                if faq_answer and not faq_answer.startswith("Sorry") and not faq_answer.startswith("කණගාටුයි") and not faq_answer.startswith("மன்னிக்கவும்"):
+                    return ChatResponse(
+                        answer=faq_answer,
+                        context_used=context_name,
+                        success=True
+                    )
+                # If it's a "sorry" message, still return it but with success=False
+                elif faq_answer and (faq_answer.startswith("Sorry") or faq_answer.startswith("කණගාටුයි") or faq_answer.startswith("மன்னிக்கவும்")):
+                    return ChatResponse(
+                        answer=faq_answer,
+                        context_used=context_name,
+                        success=False,
+                        error="No specific information found for this question."
+                    )
         except Exception:
             pass
-        if faq_answer and not faq_answer.startswith("Sorry"):
-            return ChatResponse(
-                answer=faq_answer,
-                context_used=context_name,
-                success=True
-            )
-        if faq_answer and faq_answer.startswith("Sorry"):
-            hotline = {
-                "en": "Please call the President's Fund hotline at +94-11-2354354 for further assistance.",
-                "si": "කරුණාකර වැඩිදුර උපදෙස් සඳහා ජනාධිපති අරමුදලේ හොට්ලයින් +94-11-2354354 අමතන්න.",
-                "ta": "மேலும் உதவிக்கு ஜனாதிபதி நிதி ஹாட்லைன் +94-11-2354354 ஐ அழைக்கவும்."
-            }
-            return ChatResponse(
-                answer=hotline.get(language, hotline["en"]),
-                context_used=context_name,
-                success=False,
-                error="Question not found in FAQ."
-            )
 
         # Build the messages for Groq
         messages = [
